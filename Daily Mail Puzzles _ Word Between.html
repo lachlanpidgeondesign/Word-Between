@@ -278,14 +278,14 @@
   "use strict";
 
   // ---- Config -------------------------------------------------------------
-  var ANSWER = "city";
+  var ANSWER = "jelly";
   var MAX_GUESSES = 10;
   var RADIUS = 103.923; // matches the prototype's translateZ / wheel geometry
   var STEP = 30;        // degrees between adjacent wheel slots
 
   // ---- State --------------------------------------------------------------
-  var aboveWords = ["boy"];  // words alphabetically before the answer (shown above)
-  var belowWords = ["desk"]; // words alphabetically after the answer (shown below)
+  var aboveWords = ["happy"];  // start word: alphabetically before the answer (shown above)
+  var belowWords = ["light"];  // end word: alphabetically after the answer (shown below)
   var guessesLeft = MAX_GUESSES;
   var typed = "";
   var gameOver = false;
@@ -294,6 +294,7 @@
 
   // ---- DOM handles (resolved after shadow root is ready) ------------------
   var root, ul, inputCard, inputWrapper, inputSpan, inputBack, statusEl, keyEls = {};
+  var guessNum = null;
   var elByWord = new Map();
 
   function title(w) {
@@ -351,15 +352,37 @@
     });
   }
 
+  // Letter slots: underscores reveal how many letters the answer has, filling in
+  // with the player's typed letters as they go.
+  function slotText() {
+    var len = Math.max(ANSWER.length, typed.length);
+    var out = [];
+    for (var i = 0; i < len; i++) {
+      out.push(i < typed.length ? typed.charAt(i) : "_");
+    }
+    return out.join(" ");
+  }
+
   function renderInput() {
-    if (!inputSpan) return;
-    if (typed) {
-      inputSpan.textContent = typed;
-      inputSpan.classList.remove("opacity-50");
-    } else if (!gameOver) {
-      // The guess count now lives in the centre focal point.
-      inputSpan.textContent = guessesLeft + (guessesLeft === 1 ? " guess left" : " guesses left");
-      inputSpan.classList.add("opacity-50");
+    if (!inputSpan || gameOver) return; // win/lose text is set explicitly
+    inputSpan.textContent = slotText();
+    inputSpan.classList.add("wb-slots");
+    inputSpan.classList.toggle("opacity-50", !typed);
+  }
+
+  // Guesses indicator: a single number that ticks down. The old value rolls up
+  // and out the top while the new value rolls in from below (odometer style).
+  function tickGuesses(n) {
+    if (!guessNum) return;
+    var cur = guessNum.querySelector(".wb-num-cur");
+    if (cur && cur.textContent === String(n)) return;
+    var incoming = document.createElement("span");
+    incoming.className = "wb-num-cur wb-num-in";
+    incoming.textContent = String(n);
+    guessNum.appendChild(incoming);
+    if (cur) {
+      cur.className = "wb-num-out";
+      setTimeout(function () { if (cur.parentNode) cur.parentNode.removeChild(cur); }, 440);
     }
   }
 
@@ -377,26 +400,22 @@
 
   function applyTension() {
     var lvl = tensionLevel();
-    // Colour + motion centre on the input card (the focal point).
+    // Colour centres on the input card (the focal point). No idle motion:
+    // urgency is delivered as a one-shot pop on the guess count after each guess.
     if (inputCard) {
       if (lvl) inputCard.dataset.tension = String(lvl);
       else delete inputCard.dataset.tension;
-    }
-    if (inputWrapper) {
-      if (lvl >= 1) {
-        inputWrapper.classList.add("wb-breathing");
-        var dur = lvl >= 3 ? "2.2s" : lvl >= 2 ? "3s" : "4s";
-        var amt = lvl >= 3 ? "1.03" : lvl >= 2 ? "1.02" : "1.012";
-        inputWrapper.style.setProperty("--wb-breath-dur", dur);
-        inputWrapper.style.setProperty("--wb-breath", amt);
-      } else {
-        inputWrapper.classList.remove("wb-breathing");
-      }
     }
   }
 
   function pulseCounter() {
     if (!inputSpan) return;
+    // Escalate the one-shot pop as guesses run out: bigger + snappier = urgency.
+    var lvl = tensionLevel();
+    var amt = lvl >= 3 ? "1.4" : lvl >= 2 ? "1.3" : lvl >= 1 ? "1.22" : "1.16";
+    var dur = lvl >= 3 ? "0.34s" : lvl >= 2 ? "0.38s" : "0.42s";
+    inputSpan.style.setProperty("--wb-pop-amt", amt);
+    inputSpan.style.setProperty("--wb-pop-dur", dur);
     inputSpan.classList.remove("wb-pop");
     void inputSpan.offsetWidth; // restart the one-shot pop
     inputSpan.classList.add("wb-pop");
@@ -489,6 +508,7 @@
     typed = "";
     render();
     pulseCounter();
+    tickGuesses(guessesLeft); // roll the guesses number down, alongside the count pop
     if (guessesLeft <= 0) { lose(); }
   }
 
@@ -558,11 +578,9 @@
     var style = document.createElement("style");
     style.textContent =
       ".input-front span{transition:color .6s ease}" +
-      ".input-front span.wb-pop{animation:wb-count-pop .5s cubic-bezier(.34,1.56,.64,1)}" +
-      "@keyframes wb-count-pop{0%{transform:scale(1)}45%{transform:scale(1.16)}100%{transform:scale(1)}}" +
-      "@keyframes wb-breath{0%,100%{transform:scale(1)}50%{transform:scale(var(--wb-breath,1.02))}}" +
-      ".input-wrapper.wb-breathing{animation:wb-breath var(--wb-breath-dur,4s) ease-in-out infinite;will-change:transform}" +
-      ".word-wheel:has(.wb-breathing),.word-wheel:has(.wb-win){overflow:visible;-webkit-mask-image:none;mask-image:none}" +
+      ".input-front span.wb-pop{animation:wb-count-pop var(--wb-pop-dur,.42s) cubic-bezier(.34,1.56,.64,1)}" +
+      "@keyframes wb-count-pop{0%{transform:scale(1)}45%{transform:scale(var(--wb-pop-amt,1.16))}100%{transform:scale(1)}}" +
+      ".word-wheel:has(.wb-win){overflow:visible;-webkit-mask-image:none;mask-image:none}" +
       ".input-card[data-tension] .input-front{transition:border-color .6s ease}" +
       ".input-card[data-tension] .input-front{border-color:var(--wb-tint)}" +
       ".input-card[data-tension] .input-front span{color:var(--wb-text)}" +
@@ -571,6 +589,15 @@
       ".input-card[data-tension='3']{--wb-tint:#e0761b;--wb-text:#653806}" +
       "@keyframes wb-win-pulse{0%{transform:scale(1)}30%{transform:scale(1.14)}55%{transform:scale(.98)}75%{transform:scale(1.05)}100%{transform:scale(1)}}" +
       ".input-wrapper.wb-win{animation:wb-win-pulse .7s cubic-bezier(.34,1.56,.64,1)}" +
+      ".wb-slots{letter-spacing:3px;text-transform:uppercase}" +
+      ".wb-guesses{display:flex;align-items:center;justify-content:center;gap:8px;margin:0 auto 14px;user-select:none}" +
+      ".wb-guesses-label{font-size:13px;font-weight:500;color:var(--color-foreground)}" +
+      ".wb-num{position:relative;display:inline-block;height:22px;min-width:22px;overflow:hidden;text-align:center;font-size:18px;font-weight:700;line-height:22px;color:#191919}" +
+      ".wb-num span{display:block;position:absolute;left:0;right:0;top:0}" +
+      "@keyframes wb-tick-in{0%{transform:translateY(100%);opacity:0}100%{transform:translateY(0);opacity:1}}" +
+      "@keyframes wb-tick-out{0%{transform:translateY(0);opacity:1}100%{transform:translateY(-100%);opacity:0}}" +
+      ".wb-num .wb-num-in{animation:wb-tick-in .4s cubic-bezier(.34,1.2,.5,1)}" +
+      ".wb-num .wb-num-out{animation:wb-tick-out .4s cubic-bezier(.34,1.2,.5,1) forwards}" +
       ".wb-endscreen{position:absolute;inset:0;z-index:200;overflow-y:auto;background:#FFF0DB;" +
       "opacity:0;transform:translateY(12px);transition:opacity .3s ease,transform .3s cubic-bezier(.34,1.56,.64,1)}" +
       ".wb-endscreen.wb-endscreen-in{opacity:1;transform:translateY(0)}";
@@ -595,6 +622,25 @@
       keyEls[key] = btn;
       btn.addEventListener("click", function () { handleKey(key); });
     });
+
+    // Guesses indicator: a row of dots + label inserted above the keyboard.
+    var kb = root.querySelector(".pointer-events-auto");
+    if (kb) {
+      var gWrap = document.createElement("div");
+      gWrap.className = "wb-guesses";
+      var gLabel = document.createElement("span");
+      gLabel.className = "wb-guesses-label";
+      gLabel.textContent = "Guesses left:";
+      guessNum = document.createElement("div");
+      guessNum.className = "wb-num";
+      var first = document.createElement("span");
+      first.className = "wb-num-cur";
+      first.textContent = String(guessesLeft);
+      guessNum.appendChild(first);
+      gWrap.appendChild(gLabel);
+      gWrap.appendChild(guessNum);
+      kb.insertBefore(gWrap, kb.firstChild);
+    }
 
     // Physical keyboard.
     window.addEventListener("keydown", function (e) {
